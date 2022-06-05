@@ -1,0 +1,87 @@
+<html>
+<head>
+</head>
+<body>
+   <div>
+      <p>
+         <label for="backend">Choose ONNX backend:</label>
+         <select id="backend" name="onnxBackendHint">
+            <option value="cpu">CPU</option>
+            <option value="wasm">WASM</option>
+            <option value="webgl">WEBGL</option>
+         </select>
+      </p>
+      <p>
+         <label for="urlpath">ONNX Model url:</label>
+         <input id='urlpath' type='text' size='40'></input>
+      </p>
+      <p>
+         <label for="inputDims">ONNX comma separated input shape:</label>
+         <input id='inputDims' type='text' size='21' value='1,'></input>
+      </p>
+      <p>
+         <label for="warmups">Warmup times:</label>
+         <input id='warmups' type='number' min='1' max='100' step='1' value='5'></input>
+         <label for="runs">Times:</label>
+         <input id='runs' type='number' min='1' max='10000' step='1' value='100'></input>
+      </p>
+      <p>
+         <input type="submit" value="Run Benchmark" onclick="run()"></input>
+      </p>
+   </div>
+   <div>
+      <h2 id='result'></h2>
+   </div>
+   <script src="onnx.min.js"></script>
+   <script>
+      let busy = false;
+      async function run() {
+          console.log('fired');
+          if (busy) return;
+          const N = parseInt(document.getElementById('runs').value) | 5;
+          const WN = parseInt(document.getElementById('warmups').value) | 1;
+          const inputPath = document.getElementById('urlpath').value;
+          const inputDims = document.getElementById('inputDims').value.split(',').map(e => parseInt(e));
+          const backend = document.getElementById('backend').value;
+          //localStorage.setItem('urlpath', urlpath);
+          busy = true;
+          console.log(N, WN, inputPath, inputDims, backend, parseInt(inputDims.reduce((x, y) => x * y, 1)));
+          const session = new onnx.InferenceSession({
+              backendHint: backend
+          });
+          await session.loadModel(inputPath);
+
+          console.log('model loaded', session.session);
+          //return;
+		  let inputs = [new onnx.Tensor(new Float32Array(parseInt(inputDims.reduce((x, y) => x * y, 1))), 'float32', inputDims)];
+		  let start = performance.now();
+		  await session.run(inputs);
+		  let elapsed = performance.now() - start;
+          for (let i = 1; i < WN; i++) {
+              inputs = [new onnx.Tensor(new Float32Array(parseInt(inputDims.reduce((x, y) => x * y, 1))), 'float32', inputDims)];
+              start = performance.now();
+              await session.run(inputs);
+              elapsed += performance.now() - start;
+          }
+          console.log('Warmup took', elapsed/WN);
+
+          let totalElapsed = 0;
+          let sumSquares = 0;
+          for (let i = 0; i < N; i++) {
+              inputs = [new onnx.Tensor(new Float32Array(parseInt(inputDims.reduce((x, y) => x * y, 1))), 'float32', inputDims)];
+              start = performance.now();
+              await session.run(inputs);
+              elapsed = performance.now() - start;
+              totalElapsed += elapsed;
+              sumSquares += elapsed * elapsed;
+              console.log(`Run ${i+2} took ${elapsed} ms with std ${Math.sqrt(sumSquares/(i+1)-Math.pow(totalElapsed/(i+1), 2))}`);
+          }
+          console.log(`Average ${totalElapsed / N}\nStandard Deviation ${Math.sqrt(N/(N-1)*(sumSquares/N-Math.pow(totalElapsed/N, 2)))}`);
+          const avg = (totalElapsed / N).toFixed(2);
+          const std = Math.sqrt(N / (N - 1) * (sumSquares / N - Math.pow(totalElapsed / N, 2))).toFixed(2);
+          document.getElementById('result').innerText = `Average ${avg} ms\nStandard Deviation ${std} ms`;
+          busy = false;
+      }
+   </script>
+</body>
+</html>
